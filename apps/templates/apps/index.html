@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play Store gap research</title>
+<meta name="csrf-token" content="{{ csrf_token }}">
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel-2: #1f232c;
+    --line: #2a2f3a; --text: #e6e9ef; --muted: #98a1b3;
+    --accent: #5b8cff; --warn: #f0b429; --bad: #e5534b; --good: #3fb950;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 20px 24px; border-bottom: 1px solid var(--line);
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+    position: sticky; top: 0; background: var(--bg); z-index: 10;
+  }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  .search { display: flex; gap: 8px; flex: 1; min-width: 320px; }
+  input[type=text], input[type=date], input[type=number], select {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 12px; font: inherit; outline: none;
+  }
+  input[type=text]:focus, select:focus { border-color: var(--accent); }
+  input[type=text] { flex: 1; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); font-weight: 500; }
+  main { padding: 20px 24px 60px; max-width: 1200px; margin: 0 auto; }
+  .status { color: var(--muted); padding: 12px 0; min-height: 24px; }
+  .status.err { color: var(--bad); }
+  .warnings { border: 1px solid #4a3a12; background: #2a2110; color: var(--warn);
+    border-radius: 8px; padding: 10px 14px; margin: 12px 0; font-size: 13px; }
+  .warnings ul { margin: 6px 0 0; padding-left: 18px; }
+  .apps { display: grid; gap: 8px; }
+  .app {
+    display: grid; grid-template-columns: 22px 48px 1fr auto; gap: 14px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; cursor: pointer;
+  }
+  .app:hover { border-color: #3a4356; }
+  .app.inspecting { border-color: var(--accent); background: var(--panel-2); }
+  .app.picked { box-shadow: inset 3px 0 0 var(--accent); }
+  .app .chk { width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--line);
+    background: var(--panel-2); display: flex; align-items: center; justify-content: center;
+    font-size: 12px; color: transparent; }
+  .app.picked .chk { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .apps-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .apps-toolbar .count { color: var(--muted); font-size: 12.5px; }
+  .review .app-tag { color: var(--accent); }
+  .app img { width: 48px; height: 48px; border-radius: 10px; background: var(--panel-2); object-fit: cover; }
+  .app .t { font-weight: 600; }
+  .app .m { color: var(--muted); font-size: 12.5px; }
+  .app .r { text-align: right; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  .app .r b { color: var(--text); font-size: 15px; display: block; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-top: 20px; }
+  .panel h2 { font-size: 14px; margin: 0 0 12px; font-weight: 600; }
+  .panel h2 small { color: var(--muted); font-weight: 400; }
+  .filters { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .field input, .field select { width: 120px; }
+  .hist { display: flex; gap: 2px; align-items: flex-end; height: 44px; margin: 10px 0 0; }
+  .hist div { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 2px; opacity: .75; }
+  .hist-legend { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+  .review { border-top: 1px solid var(--line); padding: 12px 0; }
+  .review:first-of-type { border-top: 0; }
+  .review .h { display: flex; gap: 10px; align-items: center; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; flex-wrap: wrap; }
+  .stars { color: var(--warn); letter-spacing: 1px; }
+  .review .body { white-space: pre-wrap; }
+  .reply { margin-top: 8px; padding: 8px 12px; border-left: 2px solid var(--line); color: var(--muted); font-size: 13px; }
+  .empty { color: var(--muted); padding: 20px 0; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line);
+    border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Play Store <span>gap research</span></h1>
+  <form class="search" id="search-form">
+    <input type="text" id="q" placeholder="e.g. sober tracker" autocomplete="off">
+    <button type="submit" id="go">Search</button>
+    <button type="button" class="ghost" id="force" title="Ignore cache TTL and re-scrape">Re-scrape</button>
+  </form>
+</header>
+
+<main>
+  <div class="status" id="status"></div>
+  <div id="warnings"></div>
+  <div class="apps-toolbar" id="apps-toolbar" hidden>
+    <button type="button" class="ghost" id="select-all">Select all apps</button>
+    <button type="button" class="ghost" id="clear-sel" hidden>Clear selection</button>
+    <button type="button" id="combined" disabled>Show combined reviews</button>
+    <button type="button" class="ghost" id="c-report" hidden>Download Report</button>
+    <span class="count" id="sel-count"></span>
+  </div>
+  <div class="apps" id="apps"></div>
+
+  <section class="panel" id="detail" hidden>
+    <h2 id="detail-title"></h2>
+    <div class="filters">
+      <div class="field"><label>Min stars</label>
+        <input type="number" id="min-star" value="1" min="1" max="5" step="0.1" style="width:80px">
+      </div>
+      <div class="field"><label>Max stars</label>
+        <input type="number" id="max-star" value="2" min="1" max="5" step="0.1" style="width:80px">
+      </div>
+      <div class="field"><label>From</label><input type="date" id="date-from"></div>
+      <div class="field"><label>To</label><input type="date" id="date-to"></div>
+      <div class="field"><label>App version</label><input type="text" id="app-version" placeholder="any" style="width:130px"></div>
+      <button id="apply">Apply</button>
+      <button type="button" class="ghost" id="s-report">Download Report</button>
+
+    </div>
+    <div class="hist" id="hist"></div>
+    <div class="hist-legend"><span>1★</span><span>2★</span><span>3★</span><span>4★</span><span>5★</span></div>
+  </section>
+
+  <section class="panel" id="reviews-panel" hidden>
+    <h2>Reviews <small id="review-count"></small>
+      <button type="button" class="ghost" id="s-report-2" style="float:right">Download Report</button>
+    </h2>
+    <div id="reviews"></div>
+  </section>
+
+  <section class="panel" id="combined-panel" hidden>
+    <h2>Combined reviews <small id="combined-sub"></small></h2>
+    <div class="filters" style="margin-bottom:12px">
+      <div class="field"><label>Min stars</label>
+        <input type="number" id="c-min-star" value="1" min="1" max="5" step="0.1" style="width:80px">
+      </div>
+      <div class="field"><label>Max stars</label>
+        <input type="number" id="c-max-star" value="2" min="1" max="5" step="0.1" style="width:80px">
+      </div>
+      <div class="field"><label>From</label><input type="date" id="c-date-from"></div>
+      <div class="field"><label>To</label><input type="date" id="c-date-to"></div>
+      <div class="field"><label>App version</label><input type="text" id="c-app-version" placeholder="any" style="width:130px"></div>
+      <button id="c-apply">Apply</button>
+    </div>
+    <div class="hist" id="c-hist"></div>
+    <div class="hist-legend"><span>1★</span><span>2★</span><span>3★</span><span>4★</span><span>5★</span></div>
+    <div id="c-reviews"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const CSRF = document.querySelector('meta[name=csrf-token]').content;
+const JSON_HEADERS = {'Content-Type': 'application/json', 'X-CSRFToken': CSRF};
+
+// Stars accept fractions (e.g. 2.1). The review score column is an integer,
+// so min/max compare against the rounded user rating: min 2.1 -> score >= 2,
+// max 2.1 -> score <= 2. A value equal to the next whole star is bumped so a
+// typed 3.0 does not silently include 2-star reviews.
+function starBound(id, isMin) {
+  const raw = parseFloat($(id).value);
+  if (isNaN(raw)) return isMin ? 1 : 5;
+  return isMin ? Math.ceil(raw - 0.5) : Math.floor(raw + 0.5);
+}
+let apps = [];
+let selected = null;          // single app being inspected
+let picked = new Set();       // app_ids selected for combined review view
+let lastQuery = '';           // last successful search, used to name the PDF report
+
+function setStatus(msg, isErr) {
+  const el = $('status');
+  el.className = 'status' + (isErr ? ' err' : '');
+  el.innerHTML = msg;
+}
+
+function starStr(n) {
+  const s = Math.round(n || 0);
+  return '★'.repeat(Math.max(0, Math.min(5, s))) + '☆'.repeat(Math.max(0, 5 - s));
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
+}
+
+function renderWarnings(list) {
+  const box = $('warnings');
+  if (!list || !list.length) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div class="warnings"><b>' + list.length + ' warning(s)</b><ul>' +
+    list.map(w => '<li>' + esc(w) + '</li>').join('') + '</ul></div>';
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderApps() {
+  const box = $('apps');
+  $('apps-toolbar').hidden = !apps.length;
+  renderSelState();
+  if (!apps.length) { box.innerHTML = ''; return; }
+  box.innerHTML = apps.map((a, i) => `
+    <div class="app${selected === a.app_id ? ' inspecting' : ''}${picked.has(a.app_id) ? ' picked' : ''}" data-idx="${i}">
+      <div class="chk" title="Select for combined reviews">✓</div>
+      ${a.icon ? `<img src="${esc(a.icon)}" alt="" loading="lazy">` : '<div></div>'}
+      <div>
+        <div class="t">${esc(a.title)}</div>
+        <div class="m">${esc(a.developer || '')} · ${esc(a.category || 'n/a')} · ${esc(a.installs || '')}</div>
+      </div>
+      <div class="r">
+        <b>${a.similarity != null ? (a.similarity * 100).toFixed(0) + '%' : '—'}</b>
+        ${a.score != null ? a.score.toFixed(2) + '★' : 'no rating'}<br>
+        ${a.review_count} reviews
+      </div>
+    </div>`).join('');
+  box.querySelectorAll('.app').forEach(el => {
+    const idx = +el.dataset.idx;
+    // Checkbox toggles multi-select; the rest of the row inspects one app.
+    el.querySelector('.chk').onclick = (ev) => {
+      ev.stopPropagation();
+      togglePick(apps[idx].app_id);
+    };
+    // Ctrl/Cmd/Shift-click anywhere on the row also toggles selection.
+    el.onclick = (ev) => {
+      if (ev.ctrlKey || ev.metaKey || ev.shiftKey) {
+        togglePick(apps[idx].app_id);
+      } else {
+        selectApp(apps[idx]);
+      }
+    };
+  });
+}
+
+function renderSelState() {
+  const n = picked.size;
+  $('select-all').hidden = !apps.length;
+  $('clear-sel').hidden = n === 0;
+  $('c-report').hidden = $('combined-panel').hidden;
+  $('combined').disabled = n === 0;
+  $('sel-count').textContent = n
+    ? `${n} selected`
+    : 'Select apps to see combined reviews';
+}
+
+function togglePick(appId) {
+  if (picked.has(appId)) picked.delete(appId); else picked.add(appId);
+  renderApps();
+}
+
+function renderHistogram(hist) {
+  const box = $('hist');
+  if (!hist || !hist.length) { box.innerHTML = ''; return; }
+  const max = Math.max(...hist, 1);
+  box.innerHTML = hist.map(v =>
+    `<div style="height:${Math.max(2, (v / max) * 44)}px" title="${v}"></div>`
+  ).join('');
+}
+
+function selectApp(app) {
+  selected = app.app_id;
+  renderApps();
+  $('combined-panel').hidden = true;
+  // Single-app inspection replaces nothing in the picked set; the two
+  // modes are independent so a user can inspect one app while building
+  // a multi-app selection.
+  $('detail').hidden = false;
+  $('detail-title').innerHTML = esc(app.title) + ' <small>· ' + esc(app.app_id) + '</small>';
+  renderHistogram(app.histogram);
+  $('app-version').value = '';
+  loadReviews();
+}
+
+async function loadReviews() {
+  if (!selected) return;
+  $('reviews-panel').hidden = false;
+  $('reviews').innerHTML = '<div class="empty"><span class="spinner"></span> loading reviews…</div>';
+  $('review-count').textContent = '';
+
+  const p = new URLSearchParams({
+    min_star: starBound('min-star', true),
+    max_star: starBound('max-star', false),
+    limit: 200,
+  });
+  if ($('date-from').value) p.set('date_from', $('date-from').value);
+  if ($('date-to').value) p.set('date_to', $('date-to').value);
+  if ($('app-version').value.trim()) p.set('app_version', $('app-version').value.trim());
+
+  try {
+    const r = await fetch('/api/reviews/' + encodeURIComponent(selected) + '?' + p);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    renderReviews(data);
+  } catch (e) {
+    $('reviews').innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderReviews(data) {
+  $('review-count').textContent = `— ${data.total} match, showing ${data.returned}`;
+  if (!data.reviews.length) {
+    $('reviews').innerHTML = '<div class="empty">No reviews in this range. Try widening min/max stars.</div>';
+    return;
+  }
+  $('reviews').innerHTML = data.reviews.map(r => `
+    <div class="review">
+      <div class="h">
+        <span class="stars">${starStr(r.score)}</span>
+        <span>${fmtDate(r.at)}</span>
+        ${r.app_version ? '<span>v' + esc(r.app_version) + '</span>' : ''}
+        ${r.thumbs_up ? '<span>👍 ' + r.thumbs_up + '</span>' : ''}
+      </div>
+      <div class="body">${esc(r.content)}</div>
+      ${r.reply_content ? '<div class="reply"><b>Developer:</b> ' + esc(r.reply_content) + '</div>' : ''}
+    </div>`).join('');
+}
+
+$('search-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const q = $('q').value.trim();
+  if (!q) return;
+  $('go').disabled = true;
+  $('apps').innerHTML = '';
+  $('warnings').innerHTML = '';
+  $('detail').hidden = true;
+  $('reviews-panel').hidden = true;
+  setStatus('<span class="spinner"></span> scraping “' + esc(q) + '” — first run can take a minute…');
+  try {
+    const r = await fetch('/api/search', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({query: q, force: false}),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    apps = data.apps || [];
+    selected = null;
+    picked = new Set();
+    lastQuery = q;
+    $('combined-panel').hidden = true;
+    renderApps();
+    renderWarnings(data.warnings);
+    setStatus(apps.length ? `Found ${apps.length} similar app(s) for “${esc(q)}” — pick one.` : 'No apps found.');
+  } catch (err) {
+    setStatus('Search failed: ' + esc(err.message), true);
+  } finally {
+    $('go').disabled = false;
+  }
+};
+
+$('force').onclick = async () => {
+  const q = $('q').value.trim();
+  if (!q) return;
+  $('force').disabled = true;
+  setStatus('<span class="spinner"></span> re-scraping (bypassing cache)…');
+  try {
+    const r = await fetch('/api/search', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({query: q, force: true}),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    apps = data.apps || [];
+    selected = null;
+    picked = new Set();
+    lastQuery = q;
+    $('combined-panel').hidden = true;
+    renderApps();
+    renderWarnings(data.warnings);
+    setStatus(`Re-scraped ${apps.length} app(s).`);
+  } catch (err) {
+    setStatus('Re-scrape failed: ' + esc(err.message), true);
+  } finally {
+    $('force').disabled = false;
+  }
+};
+
+$('apply').onclick = loadReviews;
+
+// Download the single-app report using the same filters as the review view.
+// Wired to both buttons: the one next to Apply and the one atop the reviews list.
+function downloadSingleReport() {
+  if (!selected) return;
+  const p = new URLSearchParams({
+    app_ids: selected,
+    min_star: starBound('min-star', true),
+    max_star: starBound('max-star', false),
+    limit: 500,
+  });
+  if ($('date-from').value) p.set('date_from', $('date-from').value);
+  if ($('date-to').value) p.set('date_to', $('date-to').value);
+  if ($('app-version').value.trim()) p.set('app_version', $('app-version').value.trim());
+  if (lastQuery) p.set('query', lastQuery);
+  window.location = '/api/reviews/report.pdf?' + p;
+}
+$('s-report').onclick = downloadSingleReport;
+$('s-report-2').onclick = downloadSingleReport;
+
+$('select-all').onclick = () => {
+  const all = apps.map(a => a.app_id);
+  // Toggle: if every displayed app is already picked, clear instead.
+  if (all.length && all.every(id => picked.has(id))) {
+    picked.clear();
+  } else {
+    picked = new Set(all);
+  }
+  renderApps();
+};
+
+$('clear-sel').onclick = () => {
+  picked.clear();
+  renderApps();
+};
+
+$('combined').onclick = () => showCombined();
+$('c-apply').onclick = () => showCombined();
+
+$('c-report').onclick = () => {
+  if (!picked.size) return;
+  const p = new URLSearchParams({
+    app_ids: [...picked].join(','),
+    min_star: starBound('c-min-star', true),
+    max_star: starBound('c-max-star', false),
+    limit: 500,
+  });
+  if ($('c-date-from').value) p.set('date_from', $('c-date-from').value);
+  if ($('c-date-to').value) p.set('date_to', $('c-date-to').value);
+  if ($('c-app-version').value.trim()) p.set('app_version', $('c-app-version').value.trim());
+  if (lastQuery) p.set('query', lastQuery);
+  window.location = '/api/reviews/report.pdf?' + p;
+};
+
+function showCombined() {
+  if (!picked.size) return;
+  selected = null;
+  $('detail').hidden = true;
+  $('reviews-panel').hidden = true;
+  $('combined-panel').hidden = false;
+  $('c-report').hidden = false;
+  renderApps();
+  loadCombined();
+}
+
+function renderCombinedHistogram(hist) {
+  const box = $('c-hist');
+  if (!hist || !hist.length) { box.innerHTML = ''; return; }
+  const max = Math.max(...hist, 1);
+  box.innerHTML = hist.map(v =>
+    `<div style="height:${Math.max(2, (v / max) * 44)}px" title="${v}"></div>`
+  ).join('');
+}
+
+function combinedHistogram(rows) {
+  const h = [0, 0, 0, 0, 0];
+  rows.forEach(r => { if (r.score >= 1 && r.score <= 5) h[r.score - 1] += 1; });
+  return h;
+}
+
+async function loadCombined() {
+  const ids = [...picked];
+  $('combined-sub').textContent = `— ${ids.length} app(s)`;
+  $('c-reviews').innerHTML = '<div class="empty"><span class="spinner"></span> loading reviews…</div>';
+
+  const p = new URLSearchParams({
+    app_ids: ids.join(','),
+    min_star: starBound('c-min-star', true),
+    max_star: starBound('c-max-star', false),
+    limit: 500,
+  });
+  if ($('c-date-from').value) p.set('date_from', $('c-date-from').value);
+  if ($('c-date-to').value) p.set('date_to', $('c-date-to').value);
+  if ($('c-app-version').value.trim()) p.set('app_version', $('c-app-version').value.trim());
+
+  try {
+    const r = await fetch('/api/reviews?' + p);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    renderCombinedHistogram(combinedHistogram(data.reviews));
+    renderCombinedReviews(data);
+  } catch (e) {
+    $('c-reviews').innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderCombinedReviews(data) {
+  $('combined-sub').textContent = `— ${picked.size} app(s), ${data.total} match, showing ${data.returned}`;
+  if (!data.reviews.length) {
+    $('c-reviews').innerHTML = '<div class="empty">No reviews in this range across the selected apps.</div>';
+    return;
+  }
+  $('c-reviews').innerHTML = data.reviews.map(r => `
+    <div class="review">
+      <div class="h">
+        <span class="stars">${starStr(r.score)}</span>
+        <span class="app-tag">${esc(r.app_title || r.app_id || '')}</span>
+        <span>${fmtDate(r.at)}</span>
+        ${r.app_version ? '<span>v' + esc(r.app_version) + '</span>' : ''}
+        ${r.thumbs_up ? '<span>👍 ' + r.thumbs_up + '</span>' : ''}
+      </div>
+      <div class="body">${esc(r.content)}</div>
+      ${r.reply_content ? '<div class="reply"><b>Developer:</b> ' + esc(r.reply_content) + '</div>' : ''}
+    </div>`).join('');
+}
+</script>
+</body>
+</html>

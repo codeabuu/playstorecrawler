@@ -1,0 +1,15 @@
+Django==4.2.6
+djangorestframework==3.15.2
+django-cors-headers==4.9.0
+requests==2.32.3
+numpy==1.26.4
+scikit-learn==1.5.1
+psycopg2-binary==2.9.9
+
+google-play-scraper==1.2.7
+fastembed==0.3.6
+
+pytest==8.3.3
+pytest-django==4.9.0
+vcrpy==6.0.2
+reportlab==5.1.0
