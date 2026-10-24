@@ -31,7 +31,13 @@ from django.utils import timezone
 
 from apps.models import App, Review
 
-from .play import ScrapeError, fetch_app_details, fetch_reviews, search_apps
+from .play import (
+    ScrapeError,
+    browse_category,
+    fetch_app_details,
+    fetch_reviews,
+    search_apps,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -163,8 +169,33 @@ def _persist_reviews(app: App, rows: list[dict[str, Any]]) -> int:
     return len(objs)
 
 
-def run_search(query: str, *, force: bool = False) -> dict[str, Any]:
+def _matches_category(meta: dict[str, Any], category: str | None) -> bool:
+    """True if this app belongs to the requested niche.
+
+    Play's `genre` is the authoritative value we stored in App.category.
+    Comparison is case-insensitive because Play has changed casing over
+    time ("Art & Design" vs "ART_AND_DESIGN" in older responses).
+    """
+    if not category:
+        return True
+    actual = (meta.get("category") or "").strip().lower()
+    return actual == category.strip().lower()
+
+
+def run_search(
+    query: str, *, force: bool = False, category: str | None = None
+) -> dict[str, Any]:
     """Full pipeline for one query. Returns a serialisable summary.
+
+    `category` is an optional Play Store niche (see scraper/categories.py).
+    Play's search endpoint has no category argument, so we scrape the
+    keyword hits and then drop anything outside the niche. When the niche
+    filter empties the result set we say so explicitly instead of
+    returning a bare empty list.
+
+    Browse mode: an empty `query` with a `category` skips keyword search
+    entirely and lists that niche's top apps. There is no keyword to rank
+    against, so `similarity` is left None and the UI sorts by installs.
 
     Caching: if every app for this query was scraped within TTL, no
     network calls happen (force=True bypasses). Similarity is recomputed
@@ -172,12 +203,19 @@ def run_search(query: str, *, force: bool = False) -> dict[str, Any]:
     relative to network I/O and the centroid can shift.
     """
     query = query.strip()
-    if not query:
-        raise ValueError("query must not be empty")
+    category = (category or "").strip() or None
+    if not query and not category:
+        raise ValueError("query or category must be given")
 
-    hits = search_apps(query)
+    browsing = not query
+    hits = browse_category(category) if browsing else search_apps(query)
     if not hits:
-        return {"query": query, "apps": [], "warnings": ["No Play Store results."]}
+        return {
+            "query": query,
+            "category": category,
+            "apps": [],
+            "warnings": ["No Play Store results."],
+        }
 
     # Enrich: search hits lack description/summary/histogram.
     enriched: list[dict[str, Any]] = []
@@ -209,7 +247,26 @@ def run_search(query: str, *, force: bool = False) -> dict[str, Any]:
             warnings.append(f"Skipped {hit['app_id']}: {exc}")
             logger.warning("detail scrape failed for %s: %s", hit["app_id"], exc)
 
-    ranked = rank_by_similarity(query, enriched)
+    if category and not browsing:
+        before = len(enriched)
+        enriched = [m for m in enriched if _matches_category(m, category)]
+        if not enriched:
+            from .categories import label_for
+
+            return {
+                "query": query,
+                "category": category,
+                "apps": [],
+                "warnings": [
+                    f"None of the {before} results for {query!r} are in "
+                    f"{label_for(category)!r}. Try a broader keyword or a "
+                    "different niche."
+                ],
+            }
+
+    # Browse mode has no keyword, so there is nothing to measure the
+    # candidates against; keep Play's own ordering instead.
+    ranked = enriched if browsing else rank_by_similarity(query, enriched)
 
     saved: list[App] = []
     for cand in ranked:
@@ -234,6 +291,7 @@ def run_search(query: str, *, force: bool = False) -> dict[str, Any]:
 
     return {
         "query": query,
+        "category": category,
         "apps": [
             {
                 "app_id": a.app_id,

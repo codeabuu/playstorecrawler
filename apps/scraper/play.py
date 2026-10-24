@@ -177,6 +177,100 @@ def search_apps(query: str, n_hits: int | None = None) -> list[dict[str, Any]]:
     return out
 
 
+_GENRE_MAP = {
+    "art_and_design": "ART_AND_DESIGN",
+    "auto_and_vehicles": "AUTO_AND_VEHICLES",
+    "beauty": "BEAUTY",
+    "books_and_reference": "BOOKS_AND_REFERENCE",
+    "business": "BUSINESS",
+    "comics": "COMICS",
+    "communication": "COMMUNICATION",
+    "dating": "DATING",
+    "education": "EDUCATION",
+    "entertainment": "ENTERTAINMENT",
+    "events": "EVENTS",
+    "finance": "FINANCE",
+    "food_and_drink": "FOOD_AND_DRINK",
+    "health_and_fitness": "HEALTH_AND_FITNESS",
+    "house_and_home": "HOUSE_AND_HOME",
+    "libraries_and_demo": "LIBRARIES_AND_DEMO",
+    "lifestyle": "LIFESTYLE",
+    "maps_and_navigation": "MAPS_AND_NAVIGATION",
+    "medical": "MEDICAL",
+    "music_and_audio": "MUSIC_AND_AUDIO",
+    "news_and_magazines": "NEWS_AND_MAGAZINES",
+    "parenting": "PARENTING",
+    "personalization": "PERSONALIZATION",
+    "photography": "PHOTOGRAPHY",
+    "productivity": "PRODUCTIVITY",
+    "shopping": "SHOPPING",
+    "social": "SOCIAL",
+    "sports": "SPORTS",
+    "tools": "TOOLS",
+    "travel_and_local": "TRAVEL_AND_LOCAL",
+    "video_players_and_editors": "VIDEO_PLAYERS",
+    "weather": "WEATHER",
+    "games": "GAME",
+    "action": "GAME_ACTION",
+    "adventure": "GAME_ADVENTURE",
+    "arcade": "GAME_ARCADE",
+    "board": "GAME_BOARD",
+    "card": "GAME_CARD",
+    "casino": "GAME_CASINO",
+    "casual": "GAME_CASUAL",
+    "educational_games": "GAME_EDUCATIONAL",
+    "music": "GAME_MUSIC",
+    "puzzle": "GAME_PUZZLE",
+    "racing": "GAME_RACING",
+    "role_playing": "GAME_ROLE_PLAYING",
+    "simulation": "GAME_SIMULATION",
+    "strategy": "GAME_STRATEGY",
+    "trivia": "GAME_TRIVIA",
+    "word": "GAME_WORD",
+}
+
+
+def browse_category(category: str, n_hits: int | None = None) -> list[dict[str, Any]]:
+    """Top apps for a Play Store niche, with no keyword needed.
+
+    Used when the user picks a niche but types no query. `gps.search`
+    cannot do this: it needs a term. Play's category listing is a
+    different endpoint, hence the separate function.
+
+    `category` is one of our CATEGORIES values (e.g. "health_and_fitness"),
+    translated here to the GAME_* / ART_AND_DESIGN genre string Play
+    expects. Returns the same normalised shape as `search_apps` so the
+    rest of the pipeline cannot tell the difference.
+    """
+    genre = _GENRE_MAP.get(category)
+    if genre is None:
+        raise ScrapeError(f"unknown category {category!r}")
+    hits = n_hits if n_hits is not None else settings.SEARCH_N_HITS
+    from google_play_scraper.constants import Category
+
+    enum = getattr(Category, genre, None)
+    if enum is None:
+        raise ScrapeError(f"Play has no category {genre!r}")
+    raw = _with_retries(
+        f"category({category})",
+        gps.search,
+        "",
+        category=enum,
+        n_hits=hits,
+        lang=settings.PLAY_LANG,
+        country=settings.PLAY_COUNTRY,
+    )
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw or []:
+        norm = _normalise_search_hit(item)
+        if norm["app_id"] in seen:
+            continue
+        seen.add(norm["app_id"])
+        out.append(norm)
+    return out
+
+
 def fetch_app_details(app_id: str) -> dict[str, Any]:
     raw = _with_retries(
         f"app({app_id})",

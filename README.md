@@ -1,57 +1,89 @@
 # Play Store Gap Research Tool
 
-A small Django app for competitor research on Google Play: search for apps by keyword, get back the ones that are semantically closest to your query, then dig through their reviews (single app or several at once) and export a PDF report.
+A small Django app for competitor research on Google Play: search for apps by keyword, get back the ones semantically closest to your query, then dig through their reviews (single app or several at once) and export a PDF report.
 
 ## What it does
 
-- **Search** — scrapes Play Store search results for a query, ranks candidates by embedding similarity against the query, and stores the top matches.
-- **Reviews** — pulls up to `REVIEWS_PER_APP` reviews per app and lets you filter them by star rating, date range, and app version.
+- **Search** — scrapes Play Store search results for a query, ranks candidates by embedding similarity, and stores the top matches.
+- **Reviews** — pulls up to `REVIEWS_PER_APP` reviews per app and filters them by star rating, date range, and app version.
 - **Combined view** — select several apps and read their reviews together with a merged star histogram.
 - **PDF export** — download a report for one app or a multi-app selection.
-- **Caching** — scraped data is persisted in SQLite and reused for `SCRAPE_TTL_SECONDS` (12h by default); the *Re-scrape* button bypasses the cache.
+- **Caching** — scraped data lives in SQLite and is reused for `SCRAPE_TTL_SECONDS` (12h by default); the *Re-scrape* button bypasses the cache.
 
 ## Requirements
 
 - Python 3.10+ (developed on 3.12)
 - No external database — SQLite is used by default
-- Network access to Google Play when scraping (first search downloads the embedding model too, ~130 MB)
+- Network access to Google Play when scraping (the first search also downloads the embedding model, ~130 MB)
 
 ## Setup
 
-1. Clone the repo and enter the project directory.
-
-2. Create and activate a virtual environment:
-
-   
+### 1. Clone and enter the project
 
 
-3. Install dependencies:
-
-   
 
 
-4. Apply migrations (creates the local SQLite database):
+### 2. Create and activate a virtual environment
 
-   
-
-
-5. (Optional) Create an admin user for the Django admin at `/admin/`:
-
-   
+**Windows (PowerShell):**
 
 
-6. Start the dev server:
-
-   
 
 
-Open http://127.0.0.1:8000/ and search for something like `sober tracker`.
+If PowerShell blocks the activation script, run once:
 
-On the very first search, `fastembed` downloads the `BAAI/bge-small-en-v1.5` ONNX model into `~/.cache/fastembed` (or `FASTEMBED_CACHE_PATH`). This can take a minute or two; later runs are local.
+
+
+
+**Windows (cmd):**
+
+
+
+
+**macOS / Linux:**
+
+
+
+
+### 3. Install dependencies
+
+
+
+
+### 4. Apply migrations
+
+Creates the local SQLite database `db.sqlite3`:
+
+
+
+
+### 5. (Optional) Create an admin user
+
+For the Django admin at `/admin/`:
+
+
+
+
+### 6. Start the dev server
+
+
+
+
+Open <http://127.0.0.1:8000/> and search for something like `sober tracker`.
+
+On the first search, `fastembed` downloads the `BAAI/bge-small-en-v1.5` ONNX model into `~/.cache/fastembed` (or `FASTEMBED_CACHE_PATH`). This can take a minute or two; later runs are local.
 
 ## Environment variables
 
-All are optional; defaults are fine for local use. Set them in your shell or a `.env`-style loader of your choice.
+All are optional; defaults are fine for local use. Set them in your shell before starting the server, e.g. in PowerShell:
+
+
+
+
+or in bash:
+
+
+
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -80,7 +112,12 @@ The UI is a single page, but the endpoints are usable on their own:
 | `GET` | `/api/reviews` | Same params plus `app_ids` (comma-separated) |
 | `GET` | `/api/reviews/report.pdf` | Same params, returns a PDF download |
 
-Example:
+Example — search from the command line (PowerShell):
+
+
+
+
+Example — fetch low-star reviews for one app:
 
 
 
@@ -110,17 +147,22 @@ apps/
     cassettes/        Recorded HTTP for tests
 requirements.txt
 manage.py
+conftest.py           Shared pytest fixtures
+pytest.ini            pytest / pytest-django config
 ```
 
 ## Troubleshooting
 
 - **First search is slow** — the embedding model is downloading. Check your network / `FASTEMBED_CACHE_PATH`.
-- **Search returns nothing** — try `force: true` (or the *Re-scrape* button) to bypass a stale cache, and widen `SIMILAR_MIN_SCORE` temporarily.
+- **Search returns nothing** — try the *Re-scrape* button (or `force: true`) to bypass a stale cache, and widen `SIMILAR_MIN_SCORE` temporarily.
 - **Scraping errors** — Google Play rate-limits; increase `SCRAPE_MIN_INTERVAL` and retry.
 - **Port already in use** — `python manage.py runserver 8001`.
+- **`psycopg2` build errors on Windows** — you do not need PostgreSQL locally; `psycopg2-binary` is only used if you switch `DATABASES`. The pinned wheel normally installs fine on CPython 3.12.
+- **Virtualenv activation blocked (PowerShell)** — see the `Set-ExecutionPolicy` note in step 2, or use `myvenv\Scripts\activate.bat` from cmd.
 
 ## Notes
 
 - `DEBUG` defaults to on and `SECRET_KEY` is a dev placeholder. Do not deploy as-is.
 - The scraper runs synchronously inside the request. Fine locally; move it to a task queue (Celery/Django-Q) before serving real traffic.
 - Switching to PostgreSQL only requires changing `DATABASES` in `config/settings.py` (`psycopg2-binary` is already listed).
+- `db.sqlite3` is git-ignored — every developer creates their own on `migrate`.

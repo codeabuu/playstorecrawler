@@ -52,7 +52,7 @@ desktop.ini
 node_modules/
 dist/
 
-# --- fastembed / model caches if placed locally ---
+# --- fastembed / model caches ---
 .cache/
 local_cache/
 fastembed_cache/
@@ -70,6 +70,8 @@ fastembed_cache/
 db.sqlite3-*
 .python-version
 
-# --- Jupyter (if notebooks are used for exploration) ---
+# --- Jupyter ---
 .ipynb_checkpoints/
 
+# --- VCR cassettes scratch (keep committed ones under apps/scraper/cassettes) ---
+*.cassette.tmp

@@ -111,9 +111,11 @@ PLAY_LANG = os.environ.get("PLAY_LANG", "en")
 PLAY_COUNTRY = os.environ.get("PLAY_COUNTRY", "us")
 
 # Search fan-out: how many raw search hits become similarity candidates.
-SEARCH_N_HITS = int(os.environ.get("SEARCH_N_HITS", "30"))
+# The UI paginates these 10 at a time and caps the visible list at 100, so
+# the fan-out must be at least that large for "Load more" to reach its cap.
+SEARCH_N_HITS = int(os.environ.get("SEARCH_N_HITS", "120"))
 # How many similar apps we surface after ranking.
-SIMILAR_MAX_APPS = int(os.environ.get("SIMILAR_MAX_APPS", "8"))
+SIMILAR_MAX_APPS = int(os.environ.get("SIMILAR_MAX_APPS", "100"))
 # Minimum cosine similarity (0..1) for a candidate to count as "similar".
 SIMILAR_MIN_SCORE = float(os.environ.get("SIMILAR_MIN_SCORE", "0.55"))
 

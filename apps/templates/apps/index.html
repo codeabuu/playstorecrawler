@@ -57,6 +57,8 @@
     font-size: 12px; color: transparent; }
   .app.picked .chk { background: var(--accent); border-color: var(--accent); color: #fff; }
   .apps-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .load-more { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 14px 0 4px; }
+  .load-more .hint { color: var(--muted); font-size: 12.5px; }
   .apps-toolbar .count { color: var(--muted); font-size: 12.5px; }
   .review .app-tag { color: var(--accent); }
   .app img { width: 48px; height: 48px; border-radius: 10px; background: var(--panel-2); object-fit: cover; }
@@ -91,6 +93,12 @@
   <h1>Play Store <span>gap research</span></h1>
   <form class="search" id="search-form">
     <input type="text" id="q" placeholder="e.g. sober tracker" autocomplete="off">
+    <select id="niche" title="Restrict results to one Play Store niche">
+      <option value="">Any niche</option>
+      {% for value, label in categories %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
     <button type="submit" id="go">Search</button>
     <button type="button" class="ghost" id="force" title="Ignore cache TTL and re-scrape">Re-scrape</button>
   </form>
@@ -107,6 +115,10 @@
     <span class="count" id="sel-count"></span>
   </div>
   <div class="apps" id="apps"></div>
+  <div class="load-more" id="load-more" hidden>
+    <button type="button" class="ghost" id="load-more-btn">Load more</button>
+    <span class="hint" id="load-more-hint"></span>
+  </div>
 
   <section class="panel" id="detail" hidden>
     <h2 id="detail-title"></h2>
@@ -148,6 +160,7 @@
       <div class="field"><label>To</label><input type="date" id="c-date-to"></div>
       <div class="field"><label>App version</label><input type="text" id="c-app-version" placeholder="any" style="width:130px"></div>
       <button id="c-apply">Apply</button>
+      <button type="button" class="ghost" id="c-report-inline">Download Report</button>
     </div>
     <div class="hist" id="c-hist"></div>
     <div class="hist-legend"><span>1★</span><span>2★</span><span>3★</span><span>4★</span><span>5★</span></div>
@@ -169,10 +182,30 @@ function starBound(id, isMin) {
   if (isNaN(raw)) return isMin ? 1 : 5;
   return isMin ? Math.ceil(raw - 0.5) : Math.floor(raw + 0.5);
 }
-let apps = [];
+let apps = [];                // all results for the query, most-downloaded first
+let visible = 10;             // how many apps the list currently shows
 let selected = null;          // single app being inspected
 let picked = new Set();       // app_ids selected for combined review view
 let lastQuery = '';           // last successful search, used to name the PDF report
+const PAGE_SIZE = 10;         // apps added per "Load more" click
+const VISIBLE_MAX = 100;      // hard cap on apps shown at once
+
+// Downloads arrive as display strings ("1,000,000+"). Pull out the digits so
+// the list can be ordered by popularity instead of Play's relevance ranking.
+function installsNum(s) {
+  const digits = String(s || '').replace(/[^0-9]/g, '');
+  return digits ? parseInt(digits, 10) : 0;
+}
+
+function sortByDownloads(list) {
+  return list.slice().sort((a, b) => {
+    const d = installsNum(b.installs) - installsNum(a.installs);
+    if (d) return d;
+    const r = (b.ratings_count || 0) - (a.ratings_count || 0);
+    if (r) return r;
+    return (b.similarity || 0) - (a.similarity || 0);
+  });
+}
 
 function setStatus(msg, isErr) {
   const el = $('status');
@@ -204,9 +237,10 @@ function esc(s) {
 function renderApps() {
   const box = $('apps');
   $('apps-toolbar').hidden = !apps.length;
+  $('load-more').hidden = !apps.length;
   renderSelState();
   if (!apps.length) { box.innerHTML = ''; return; }
-  box.innerHTML = apps.map((a, i) => `
+  box.innerHTML = apps.slice(0, visible).map((a, i) => `
     <div class="app${selected === a.app_id ? ' inspecting' : ''}${picked.has(a.app_id) ? ' picked' : ''}" data-idx="${i}">
       <div class="chk" title="Select for combined reviews">✓</div>
       ${a.icon ? `<img src="${esc(a.icon)}" alt="" loading="lazy">` : '<div></div>'}
@@ -236,6 +270,31 @@ function renderApps() {
       }
     };
   });
+  renderLoadMore();
+}
+
+// "Load more" adds PAGE_SIZE apps, but a list shorter than VISIBLE_MAX is
+// always shown in full: with 47 results you should never have to click
+// through to 50 just to see the last 7. Only beyond VISIBLE_MAX does the
+// button become the path to the cap, then disappear.
+function renderLoadMore() {
+  const btn = $('load-more-btn');
+  const hint = $('load-more-hint');
+  const total = apps.length;
+  if (visible < total && visible < VISIBLE_MAX) {
+    const next = Math.min(total, Math.max(visible + PAGE_SIZE, visible));
+    btn.hidden = false;
+    btn.textContent = `Load more (${next} of ${total})`;
+    hint.textContent = total > VISIBLE_MAX
+      ? `Showing ${visible} of ${total} — list caps at ${VISIBLE_MAX} to keep the page responsive.`
+      : `Showing ${visible} of ${total}, most downloaded first.`;
+  } else if (total > visible) {
+    btn.hidden = true;
+    hint.textContent = `Showing ${visible} of ${total} — refine your search to narrow the list.`;
+  } else {
+    btn.hidden = true;
+    hint.textContent = `Showing all ${total} results, most downloaded first.`;
+  }
 }
 
 function renderSelState() {
@@ -324,29 +383,39 @@ function renderReviews(data) {
 $('search-form').onsubmit = async (e) => {
   e.preventDefault();
   const q = $('q').value.trim();
-  if (!q) return;
+  const niche = $('niche').value;
+  // Empty query is allowed when a niche is picked: that browses the niche.
+  if (!q && !niche) return;
+  const nicheLabel = niche ? $('niche').selectedOptions[0].textContent : '';
+  const target = q ? '“' + esc(q) + '”' : esc(nicheLabel);
   $('go').disabled = true;
   $('apps').innerHTML = '';
   $('warnings').innerHTML = '';
   $('detail').hidden = true;
   $('reviews-panel').hidden = true;
-  setStatus('<span class="spinner"></span> scraping “' + esc(q) + '” — first run can take a minute…');
+  setStatus('<span class="spinner"></span> scraping ' + target + ' — first run can take a minute…');
   try {
     const r = await fetch('/api/search', {
       method: 'POST',
       headers: JSON_HEADERS,
-      body: JSON.stringify({query: q, force: false}),
+      body: JSON.stringify({query: q, force: false, category: niche}),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || r.statusText);
-    apps = data.apps || [];
+    apps = sortByDownloads(data.apps || []);
+    visible = PAGE_SIZE;
     selected = null;
     picked = new Set();
     lastQuery = q;
     $('combined-panel').hidden = true;
     renderApps();
     renderWarnings(data.warnings);
-    setStatus(apps.length ? `Found ${apps.length} similar app(s) for “${esc(q)}” — pick one.` : 'No apps found.');
+    if (q) {
+      const scope = nicheLabel ? ` in ${esc(nicheLabel)}` : '';
+      setStatus(apps.length ? `Found ${apps.length} similar app(s) for “${esc(q)}”${scope} — pick one.` : 'No apps found.');
+    } else {
+      setStatus(apps.length ? `Found ${apps.length} top app(s) in ${esc(nicheLabel)} — pick one.` : 'No apps found.');
+    }
   } catch (err) {
     setStatus('Search failed: ' + esc(err.message), true);
   } finally {
@@ -356,30 +425,39 @@ $('search-form').onsubmit = async (e) => {
 
 $('force').onclick = async () => {
   const q = $('q').value.trim();
-  if (!q) return;
+  const niche = $('niche').value;
+  // Same rule as the search form: a niche alone is a valid browse target.
+  if (!q && !niche) return;
   $('force').disabled = true;
   setStatus('<span class="spinner"></span> re-scraping (bypassing cache)…');
   try {
     const r = await fetch('/api/search', {
       method: 'POST',
       headers: JSON_HEADERS,
-      body: JSON.stringify({query: q, force: true}),
+      body: JSON.stringify({query: q, force: true, category: niche}),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || r.statusText);
-    apps = data.apps || [];
+    apps = sortByDownloads(data.apps || []);
+    visible = PAGE_SIZE;
     selected = null;
     picked = new Set();
     lastQuery = q;
     $('combined-panel').hidden = true;
     renderApps();
     renderWarnings(data.warnings);
-    setStatus(`Re-scraped ${apps.length} app(s).`);
+    const nicheLabel = niche ? $('niche').selectedOptions[0].textContent : '';
+    setStatus(`Re-scraped ${apps.length} app(s)${nicheLabel ? ' in ' + esc(nicheLabel) : ''}.`);
   } catch (err) {
     setStatus('Re-scrape failed: ' + esc(err.message), true);
   } finally {
     $('force').disabled = false;
   }
+};
+
+$('load-more-btn').onclick = () => {
+  visible = Math.min(apps.length, Math.min(VISIBLE_MAX, visible + PAGE_SIZE));
+  renderApps();
 };
 
 $('apply').onclick = loadReviews;
@@ -422,7 +500,7 @@ $('clear-sel').onclick = () => {
 $('combined').onclick = () => showCombined();
 $('c-apply').onclick = () => showCombined();
 
-$('c-report').onclick = () => {
+function downloadReport() {
   if (!picked.size) return;
   const p = new URLSearchParams({
     app_ids: [...picked].join(','),
@@ -435,7 +513,10 @@ $('c-report').onclick = () => {
   if ($('c-app-version').value.trim()) p.set('app_version', $('c-app-version').value.trim());
   if (lastQuery) p.set('query', lastQuery);
   window.location = '/api/reviews/report.pdf?' + p;
-};
+}
+
+$('c-report').onclick = downloadReport;
+$('c-report-inline').onclick = downloadReport;
 
 function showCombined() {
   if (!picked.size) return;

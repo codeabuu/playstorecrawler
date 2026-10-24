@@ -8,13 +8,14 @@ from django.views.decorators.http import require_GET, require_POST
 
 from apps.models import App, Review
 from apps.pdf import build_reviews_pdf
+from apps.scraper.categories import CATEGORIES
 from apps.scraper.service import run_search
 
 
 @ensure_csrf_cookie
 def index(request):
-    """Single-page UI: search box, results, reviews."""
-    return render(request, "apps/index.html")
+    """Single-page UI: search box, niche dropdown, results, reviews."""
+    return render(request, "apps/index.html", {"categories": CATEGORIES})
 
 
 @require_POST
@@ -27,12 +28,15 @@ def api_search(request):
         return JsonResponse({"error": "invalid JSON"}, status=400)
 
     query = (body.get("query") or "").strip()
-    if not query:
-        return JsonResponse({"error": "query is required"}, status=400)
-
     force = bool(body.get("force"))
+    category = (body.get("category") or "").strip() or None
+
+    # A niche with no query is a browse, not a search: show that niche's
+    # top apps. Only when both are empty is there nothing to do.
+    if not query and not category:
+        return JsonResponse({"error": "query or category is required"}, status=400)
     try:
-        result = run_search(query, force=force)
+        result = run_search(query, force=force, category=category)
     except Exception as exc:  # surface scrape errors to the UI
         return JsonResponse({"error": str(exc)}, status=500)
 
